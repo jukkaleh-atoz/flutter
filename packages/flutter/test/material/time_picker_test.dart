@@ -10,6 +10,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../widgets/semantics_tester.dart';
@@ -1855,6 +1856,76 @@ void main() {
         await tester.testTextInput.receiveAction(TextInputAction.done);
         expect(hourField.focusNode!.hasFocus, isFalse);
         expect(minuteField.focusNode!.hasFocus, isFalse);
+      });
+
+      testWidgets('24-hour locale validation works with 12-hour system format (issue #141610)', (WidgetTester tester) async {
+        // This test reproduces the issue where Finnish locale (which prefers 24-hour format)
+        // conflicts with system's 12-hour format setting, causing valid 24-hour times 
+        // like 20:00 to fail validation.
+        TimeOfDay? result;
+        
+        await tester.pumpWidget(
+          Theme(
+            data: ThemeData(useMaterial3: materialType == MaterialType.material3),
+            child: Localizations(
+              locale: const Locale('fi'), // Finnish locale prefers 24-hour format
+              delegates: const <LocalizationsDelegate<dynamic>>[
+                GlobalMaterialLocalizations.delegate,
+                GlobalWidgetsLocalizations.delegate,
+              ],
+              child: MediaQuery(
+                data: const MediaQueryData(
+                  alwaysUse24HourFormat: false, // System is set to 12-hour format
+                ),
+                child: Material(
+                  child: Center(
+                    child: Directionality(
+                      textDirection: TextDirection.ltr,
+                      child: Navigator(
+                        onGenerateRoute: (RouteSettings settings) {
+                          return MaterialPageRoute<void>(
+                            builder: (BuildContext context) {
+                              return TextButton(
+                                onPressed: () {
+                                  showTimePicker(
+                                    context: context,
+                                    initialTime: const TimeOfDay(hour: 20, minute: 0),
+                                    initialEntryMode: TimePickerEntryMode.input,
+                                  ).then((TimeOfDay? time) {
+                                    result = time;
+                                  });
+                                },
+                                child: const Text('X'),
+                              );
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.text('X'));
+        await tester.pumpAndSettle();
+
+        // Verify the UI shows 24-hour format (should show hour field that accepts 20)
+        final Finder hourField = find.byType(TextField).first;
+        await tester.tap(hourField);
+        await tester.enterText(hourField, '20');
+        
+        // Enter minutes
+        await tester.enterText(find.byType(TextField).last, '00');
+        
+        // Attempt to submit the time
+        await tester.tap(find.text(okString));
+        await tester.pumpAndSettle();
+        
+        // The time should be accepted (before the fix, this would fail validation)
+        expect(result, equals(const TimeOfDay(hour: 20, minute: 0)));
       });
     });
 
